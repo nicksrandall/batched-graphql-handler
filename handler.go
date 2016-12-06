@@ -20,7 +20,7 @@ const (
 
 type Handler struct {
 	Schema *graphql.Schema
-	pretty bool
+	Pretty bool
 }
 
 type RequestOptions struct {
@@ -122,7 +122,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var responseJSON []byte
 	var err error
-	if h.pretty {
+	if h.Pretty {
 		responseJSON, err = json.MarshalIndent(output, "", "  ")
 	} else {
 		responseJSON, err = json.Marshal(output)

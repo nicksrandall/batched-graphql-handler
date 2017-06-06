@@ -57,67 +57,57 @@ func getFromForm(values url.Values) *RequestOptions {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var output interface{}
 
-	if r.Method == http.MethodGet {
-		query := getFromForm(r.URL.Query())
+	// TODO: improve Content-Type handling
+	contentTypeStr := r.Header.Get("Content-Type")
+	contentTypeTokens := strings.Split(contentTypeStr, ";")
+	contentType := contentTypeTokens[0]
+
+	switch contentType {
+	case ContentTypeFormURLEncoded:
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		query := getFromForm(r.PostForm)
 		if query == nil {
-			http.Error(w, "Could not parse graphql params from url params.", http.StatusInternalServerError)
+			http.Error(w, "Could not parse graphql params from form.", http.StatusInternalServerError)
 			return
 		}
 
 		output = h.Schema.Exec(r.Context(), query.Query, query.OperationName, query.Variables)
-	} else {
-		// TODO: improve Content-Type handling
-		contentTypeStr := r.Header.Get("Content-Type")
-		contentTypeTokens := strings.Split(contentTypeStr, ";")
-		contentType := contentTypeTokens[0]
-
-		switch contentType {
-		case ContentTypeFormURLEncoded:
-			if err := r.ParseForm(); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-
-			query := getFromForm(r.PostForm)
-			if query == nil {
-				http.Error(w, "Could not parse graphql params from form.", http.StatusInternalServerError)
-				return
-			}
-
-			output = h.Schema.Exec(r.Context(), query.Query, query.OperationName, query.Variables)
-		case ContentTypeGraphQL:
-			body, err := ioutil.ReadAll(r.Body)
-			if err == nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			output = h.Schema.Exec(r.Context(), string(body), "", make(map[string]interface{}))
-		case ContentTypeJSON:
-			body, err := ioutil.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-
-			requestOptions := resolveJSON(body)
-			switch opts := requestOptions.(type) {
-			case *RequestOptions:
-				output = h.Schema.Exec(r.Context(), opts.Query, opts.OperationName, opts.Variables)
-			case []*RequestOptions:
-				var results []*graphql.Response
-				for i := range opts {
-					results = append(results, h.Schema.Exec(r.Context(), opts[i].Query, opts[i].OperationName, opts[i].Variables))
-				}
-				output = results
-			default:
-				log.Printf("bad type: %T", opts)
-				http.Error(w, "unrecognized RequestOptions type", http.StatusBadRequest)
-				return
-			}
-		default:
-			http.Error(w, "unrecognized content-type header: `"+contentType+"`", http.StatusBadRequest)
+	case ContentTypeGraphQL:
+		body, err := ioutil.ReadAll(r.Body)
+		if err == nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		output = h.Schema.Exec(r.Context(), string(body), "", make(map[string]interface{}))
+	case ContentTypeJSON:
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		requestOptions := resolveJSON(body)
+		switch opts := requestOptions.(type) {
+		case *RequestOptions:
+			output = h.Schema.Exec(r.Context(), opts.Query, opts.OperationName, opts.Variables)
+		case []*RequestOptions:
+			var results []*graphql.Response
+			for i := range opts {
+				results = append(results, h.Schema.Exec(r.Context(), opts[i].Query, opts[i].OperationName, opts[i].Variables))
+			}
+			output = results
+		default:
+			log.Printf("bad type: %T", opts)
+			http.Error(w, "unrecognized RequestOptions type", http.StatusBadRequest)
+			return
+		}
+	default:
+		http.Error(w, "unrecognized content-type header: `"+contentType+"`", http.StatusBadRequest)
+		return
 	}
 
 	var responseJSON []byte
@@ -133,6 +123,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.WriteHeader(http.StatusOK)
 	w.Write(responseJSON)
 }
